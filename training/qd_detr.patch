@@ -1,0 +1,46 @@
+--- a/qd_detr/model.py
++++ b/qd_detr/model.py
+@@ -2,7 +2,9 @@
+ """
+ DETR model and criterion classes.
+ """
++import os
+ import torch
++from qd_detr.delta import DeltaResidual
+ import torch.nn.functional as F
+ from torch import nn
+ 
+@@ -86,6 +88,11 @@
+         self.hidden_dim = hidden_dim
+         self.global_rep_token = torch.nn.Parameter(torch.randn(hidden_dim))
+         self.global_rep_pos = torch.nn.Parameter(torch.randn(hidden_dim))
++        variant = os.environ.get("DELTA_VARIANT", "baseline")
++        self.action_v3 = None
++        if variant != "baseline":
++            with torch.random.fork_rng(devices=[]):
++                self.action_v3 = DeltaResidual(hidden_dim, variant)
+ 
+     def forward(self, src_txt, src_txt_mask, src_vid, src_vid_mask, src_aud=None, src_aud_mask=None):
+         """The forward expects two tensors:
+@@ -109,6 +116,9 @@
+             
+         src_vid = self.input_vid_proj(src_vid)
+         src_txt = self.input_txt_proj(src_txt)
++        projected_video = src_vid
++        if self.action_v3 is not None:
++            src_vid = self.action_v3(projected_video, src_txt, src_vid_mask, src_txt_mask)
+         src = torch.cat([src_vid, src_txt], dim=1)  # (bsz, L_vid+L_txt, d)
+         mask = torch.cat([src_vid_mask, src_txt_mask], dim=1).bool()  # (bsz, L_vid+L_txt)
+         # TODO should we remove or use different positional embeddings to the src_txt?
+@@ -159,7 +169,10 @@
+         ### Neg Pairs ###
+         src_txt_neg = torch.cat([src_txt[1:], src_txt[0:1]], dim=0)
+         src_txt_mask_neg = torch.cat([src_txt_mask[1:], src_txt_mask[0:1]], dim=0)
+-        src_neg = torch.cat([src_vid, src_txt_neg], dim=1)
++        src_vid_neg = projected_video
++        if self.action_v3 is not None:
++            src_vid_neg = self.action_v3(projected_video, src_txt_neg, src_vid_mask, src_txt_mask_neg)
++        src_neg = torch.cat([src_vid_neg, src_txt_neg], dim=1)
+         mask_neg = torch.cat([src_vid_mask, src_txt_mask_neg], dim=1).bool()
+ 
+         mask_neg = torch.cat([mask_, mask_neg], dim=1)

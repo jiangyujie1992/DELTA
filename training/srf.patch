@@ -1,0 +1,33 @@
+--- a/srf/model.py
++++ b/srf/model.py
+@@ -3,7 +3,9 @@
+ DETR model and criterion classes.
+ model_multiFuser
+ """
++import os
+ import torch
++from srf.delta import DeltaResidual
+ import torch.nn.functional as F
+ from torch import nn
+ 
+@@ -192,6 +194,11 @@
+         self.self_attention = SelfAttention(256, 8, dropout=0.1)
+         self.iter_num = iter_num
+         self.weight_number = nn.Parameter(torch.rand(1, 1, 75))
++        variant = os.environ.get("DELTA_VARIANT", "baseline")
++        self.action_v3 = None
++        if variant != "baseline":
++            with torch.random.fork_rng(devices=[]):
++                self.action_v3 = DeltaResidual(hidden_dim, variant)
+ 
+ 
+ 
+@@ -222,6 +229,8 @@
+         src_vid = self.input_vid_proj(src_vid)
+         src_txt = self.input_txt_proj(src_txt)
+         src_cap = self.input_cap_proj(src_cap)
++        if self.action_v3 is not None:
++            src_vid = self.action_v3(src_vid, src_txt, src_vid_mask, src_txt_mask)
+         refined_src_cap = self.attention_weighted_sum(src_cap, src_txt)
+         refined_src_cap_mask = (src_cap_mask.sum(dim=2) > 0).float()
+         
